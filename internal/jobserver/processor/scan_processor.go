@@ -29,13 +29,14 @@ import (
 // claims the oldest pending task and runs it with a bounded semaphore; stale
 // claims (worker crash / restart) are re-queued on start.
 type scanProcessor struct {
-	cfg   config.ScanProcessorConfig
-	svc   *scan.Service
-	store scan.Store
-	owner string
-	sem   chan struct{}
-	wg    sync.WaitGroup
-	done  chan struct{}
+	cfg       config.ScanProcessorConfig
+	svc       *scan.Service
+	store     scan.Store
+	owner     string
+	sem       chan struct{}
+	wg        sync.WaitGroup
+	done      chan struct{}
+	triggerCh chan struct{}
 }
 
 // NewScanProcessor builds the security-scan processor. A nil svc disables the
@@ -55,16 +56,29 @@ func NewScanProcessor(cfg config.ScanProcessorConfig, svc *scan.Service, store s
 		hostname = "scan-worker"
 	}
 	return &scanProcessor{
-		cfg:   cfg,
-		svc:   svc,
-		store: store,
-		owner: hostname,
-		sem:   make(chan struct{}, cfg.MaxConcurrent),
-		done:  make(chan struct{}),
+		cfg:       cfg,
+		svc:       svc,
+		store:     store,
+		owner:     hostname,
+		sem:       make(chan struct{}, cfg.MaxConcurrent),
+		done:      make(chan struct{}),
+		triggerCh: make(chan struct{}, 256),
 	}
 }
 
 func (p *scanProcessor) Processor() Processor { return ProcessorScan }
+
+// Trigger requests an immediate drain. Scan tasks are claimed FIFO (not by
+// ID), so the wake-up carries no payload; periodic polling remains the
+// recovery path.
+func (p *scanProcessor) Trigger(_ int) bool {
+	select {
+	case p.triggerCh <- struct{}{}:
+		return true
+	default:
+		return false // poller will pick the task up anyway
+	}
+}
 
 func (p *scanProcessor) Start(ctx context.Context) {
 	if p.svc == nil {
@@ -94,6 +108,8 @@ func (p *scanProcessor) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			p.drain(ctx)
+		case <-p.triggerCh:
 			p.drain(ctx)
 		case <-sweep.C:
 			if n, err := p.store.ResetStaleClaims(ctx, time.Now()); err != nil {

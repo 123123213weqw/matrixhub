@@ -506,7 +506,12 @@ func (server *APIServer) initHandlersServicesRepos() {
 		registrydiscovery.ProviderHuggingFace: hfdiscovery.New(),
 		registrydiscovery.ProviderMatrixHub:   mhdiscovery.New(),
 	}
-	jobGenerator := syncpolicy.NewSyncJobGenerator(repos.Registry, discoveries)
+	jobGenerator := syncpolicy.NewSyncJobGenerator(
+		repos.Registry,
+		discoveries,
+		syncpolicy.LocalResourceSource{ResourceType: "model", Repo: repos.Model},
+		syncpolicy.LocalResourceSource{ResourceType: "dataset", Repo: repos.Dataset},
+	)
 	syncPolicyService := syncpolicy.NewSyncPolicyService(
 		repos.SyncPolicy,
 		repos.SyncTask,
@@ -560,6 +565,12 @@ func (server *APIServer) initHandlersServicesRepos() {
 	if server.config.JobServer != nil && server.config.JobServer.Enabled {
 		jc := *server.config.JobServer
 		server.jobServer = jobserver.New(&jc, syncPolicyService, syncJobService, logStore, canc, scanService, scanStore)
+		if notifier, ok := syncPolicyService.(interface{ SetOnTaskCreated(func(int) bool) }); ok {
+			notifier.SetOnTaskCreated(server.jobServer.TriggerSyncTask)
+		}
+		if notifier, ok := syncJobService.(interface{ SetOnJobCreated(func(int) bool) }); ok {
+			notifier.SetOnJobCreated(server.jobServer.TriggerSyncJob)
+		}
 	}
 
 	server.services = &Services{
