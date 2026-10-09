@@ -35,6 +35,7 @@ type JobServer struct {
 	processors      []processor.Adapter
 	syncTaskTrigger processor.Adapter
 	syncJobTrigger  processor.Adapter
+	scanTrigger     processor.Adapter
 }
 
 // New builds a JobServer from config and domain services (cfg is copied; defaults applied without mutating the caller's struct).
@@ -79,6 +80,7 @@ func New(cfg *config.JobServerConfig, syncSvc syncpolicy.ISyncPolicyService, syn
 		processors:      []processor.Adapter{syncPolicyProcessor, syncTaskProcessor, syncJobProcessor, scanProcessor},
 		syncTaskTrigger: syncTaskProcessor,
 		syncJobTrigger:  syncJobProcessor,
+		scanTrigger:     scanProcessor,
 	}
 }
 
@@ -87,6 +89,10 @@ func (js *JobServer) TriggerSyncTask(id int) bool { return js.syncTaskTrigger.Tr
 
 // TriggerSyncJob wakes the job processor after a pending job has been persisted.
 func (js *JobServer) TriggerSyncJob(id int) bool { return js.syncJobTrigger.Trigger(id) }
+
+// TriggerScan wakes the scan processor after a pending scan task has been
+// persisted. The scan processor claims FIFO, so the id is advisory only.
+func (js *JobServer) TriggerScan(id int64) bool { return js.scanTrigger.Trigger(int(id)) }
 
 // Run starts all processor loops and blocks until ctx is cancelled.
 func (js *JobServer) Run(ctx context.Context) {

@@ -483,3 +483,29 @@ func pol(sev string) Policy        { p := DefaultPolicy(); p.BlockSeverity = sev
 func polMode(m string) Policy      { p := DefaultPolicy(); p.Mode = m; return p }
 func polOnPending(v string) Policy { p := DefaultPolicy(); p.OnPending = v; return p }
 func polOnFailed(v string) Policy  { p := DefaultPolicy(); p.OnFailed = v; return p }
+
+func TestEnqueueFiresOnTaskCreated(t *testing.T) {
+	store := newMemStore()
+	tree := &fakeTree{files: map[string]string{"a": "1"}}
+	svc := newTestService(store, tree, nil)
+	fired := int64(0)
+	svc.SetOnTaskCreated(func(id int64) bool {
+		fired = id
+		return true
+	})
+	key := RepoKey{RepoType: "models", Project: "p", Name: "n"}
+	id, _ := svc.EnqueueRevision(context.Background(), key, "rev", "upload", "t", false)
+	if fired != id || id == 0 {
+		t.Fatalf("wake-up callback not fired: fired=%d id=%d", fired, id)
+	}
+	// Dedup path (already pending) must not fire again.
+	fired = 0
+	svc.SetOnTaskCreated(func(id int64) bool {
+		fired = id
+		return true
+	})
+	_, _ = svc.EnqueueRevision(context.Background(), key, "rev", "upload", "t", false)
+	if fired != 0 {
+		t.Fatal("dedup enqueue must not fire the wake-up")
+	}
+}

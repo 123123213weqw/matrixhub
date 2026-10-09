@@ -33,6 +33,15 @@ type Service struct {
 	tree     TreeReader
 	scanners []Scanner
 	lim      Limits
+	// onTaskCreated is the best-effort wake-up callback wired to the
+	// jobserver after construction (nil-safe).
+	onTaskCreated func(int64) bool
+}
+
+// SetOnTaskCreated registers the enqueue wake-up callback (mirrors the sync
+// services' SetOnJobCreated pattern).
+func (s *Service) SetOnTaskCreated(fn func(int64) bool) {
+	s.onTaskCreated = fn
 }
 
 func NewService(store Store, tree TreeReader, scanners []Scanner, lim Limits) *Service {
@@ -54,6 +63,9 @@ func (s *Service) EnqueueRevision(ctx context.Context, key RepoKey, revision, tr
 	}
 	if err := s.store.CreateTask(ctx, t); err != nil {
 		return 0, err
+	}
+	if s.onTaskCreated != nil {
+		s.onTaskCreated(t.ID) // best-effort wake-up; polling recovers on miss
 	}
 	_ = s.store.AppendAudit(ctx, AuditEvent{
 		RepoType: key.RepoType, Project: key.Project, Name: key.Name,

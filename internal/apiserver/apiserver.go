@@ -571,6 +571,7 @@ func (server *APIServer) initHandlersServicesRepos() {
 		if notifier, ok := syncJobService.(interface{ SetOnJobCreated(func(int) bool) }); ok {
 			notifier.SetOnJobCreated(server.jobServer.TriggerSyncJob)
 		}
+		scanService.SetOnTaskCreated(server.jobServer.TriggerScan)
 	}
 
 	server.services = &Services{
